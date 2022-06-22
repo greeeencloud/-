@@ -1,0 +1,359 @@
+#include <pm2008_i2c.h>
+#include <SoftwareSerial.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#include <Adafruit_NeoPixel.h>
+#ifdef __AVR__
+ #include <avr/power.h> // Required for 16 MHz Adafruit Trinket
+#endif
+
+#define LED_PIN    6
+#define PAN_PIN    13
+#define PAN_GOOD   10
+#define PAN_NORMAL 128
+#define PAN_BAD    186
+#define PAN_WORST  255
+
+// How many NeoPixels are attached to the Arduino?
+#define LED_COUNT 18
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+SoftwareSerial mySerial(10, 11); // RX, TX
+
+PM2008_I2C pm2008_i2c;   
+
+// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
+#define OLED_RESET     4 // Reset pin # (or -1 if sharing Arduino reset pin)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+#define NUMFLAKES     10 // Number of snowflakes in the animation example
+
+#define LOGO_HEIGHT   16
+#define LOGO_WIDTH    16
+static const unsigned char PROGMEM logo_bmp[] =
+{ B00000000, B11000000,
+  B00000001, B11000000,
+  B00000001, B11000000,
+  B00000011, B11100000,
+  B11110011, B11100000,
+  B11111110, B11111000,
+  B01111110, B11111111,
+  B00110011, B10011111,
+  B00011111, B11111100,
+  B00001101, B01110000,
+  B00011011, B10100000,
+  B00111111, B11100000,
+  B00111111, B11110000,
+  B01111100, B11110000,
+  B01110000, B01110000,
+  B00000000, B00110000 };
+
+
+
+// Declare our NeoPixel strip object:
+Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+// Argument 1 = Number of pixels in NeoPixel strip
+// Argument 2 = Arduino pin number (most are valid)
+// Argument 3 = Pixel type flags, add together as needed:
+//   NEO_KHZ800  800 KHz bitstream (most NeoPixel products w/WS2812 LEDs)
+//   NEO_KHZ400  400 KHz (classic 'v1' (not v2) FLORA pixels, WS2811 drivers)
+//   NEO_GRB     Pixels are wired for GRB bitstream (most NeoPixel products)
+//   NEO_RGB     Pixels are wired for RGB bitstream (v1 FLORA pixels, not v2)
+//   NEO_RGBW    Pixels are wired for RGBW bitstream (NeoPixel RGBW products)
+
+
+  
+
+void setup() {
+  pm2008_i2c.begin();
+  Serial.begin(9600);
+  pm2008_i2c.command();
+
+  mySerial.begin(9600);
+  mySerial.println("Hello, world?");
+  delay(1000);
+
+  
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;); // Don't proceed, loop forever
+  }
+   // Show initial display buffer contents on the screen --
+  // the library initializes this with an Adafruit splash screen.
+  display.display();
+  delay(2000); // Pause for 2 seconds
+
+  // Clear the buffer
+  display.clearDisplay();
+
+  // Draw a single pixel in white
+  display.drawPixel(10, 10, WHITE);
+
+  // Show the display buffer on the screen. You MUST call display() after
+  // drawing commands to make them visible on screen!
+  display.display();
+  delay(2000);
+
+
+// LED init start
+  #if defined(__AVR_ATtiny85__) && (F_CPU == 16000000)
+  clock_prescale_set(clock_div_1);
+#endif
+  // END of Trinket-specific code.
+
+  strip.begin();           // INITIALIZE NeoPixel strip object (REQUIRED)
+  strip.show();            // Turn OFF all pixels ASAP
+  strip.setBrightness(50); // Set BRIGHTNESS to about 1/5 (max = 255)
+// LED inin End  
+}
+
+void loop() {
+  uint8_t ret = pm2008_i2c.read();
+
+  uint8_t pm1p0_grade = 0;
+  uint8_t pm2p5_grade = 0;
+  uint8_t pm10p_grade = 0;
+  uint8_t total_grade = 0;
+
+  if (ret == 0) {
+    // PM 1.0
+    if (pm2008_i2c.pm1p0_grimm < 16) {
+      pm1p0_grade = 1;
+    } else if (pm2008_i2c.pm1p0_grimm < 51) {
+      pm1p0_grade = 2;
+    } else if (pm2008_i2c.pm1p0_grimm < 101) {
+      pm1p0_grade = 3;
+    } else {
+      pm1p0_grade = 4;
+    }
+
+    // PM 2.5
+    if (pm2008_i2c.pm2p5_grimm < 16) {
+      pm2p5_grade = 1;
+    } else if (pm2008_i2c.pm2p5_grimm < 51) {
+      pm2p5_grade = 2;
+    } else if (pm2008_i2c.pm2p5_grimm < 101) {
+      pm2p5_grade = 3;
+    } else {
+      pm2p5_grade = 4;
+    }
+
+    // PM 10
+    if (pm2008_i2c.pm10_grimm < 31) {
+      pm10p_grade = 1;
+    } else if (pm2008_i2c.pm10_grimm < 81) {
+      pm10p_grade = 2;
+    } else if (pm2008_i2c.pm10_grimm < 151) {
+      pm10p_grade = 3;
+    } else {
+      pm10p_grade = 4;
+    }
+
+    // Get worst grade
+    total_grade = max(pm1p0_grade, pm2p5_grade);
+    total_grade = max(total_grade, pm10p_grade);
+
+    switch (total_grade) {
+      case 1: {
+           Serial.print("PM1.0="); // pm 1.0
+          Serial.println(pm2008_i2c.pm1p0_grimm); // pm 1.0
+           Serial.print("PM2.5="); // pm 1.0
+          Serial.println(pm2008_i2c.pm2p5_grimm); // pm 1.0
+          Serial.print("PM10="); // pm 1.0
+          Serial.println(pm2008_i2c.pm10_grimm); // pm 1.0
+          Serial.println("Good!");
+          mySerial.write("Good!\r\n");
+
+           display.setTextColor(WHITE, BLACK);
+            display.setTextSize(1);
+            display.setCursor(0,0);
+            display.print("PM1.0="); // pm 1.0
+            display.println(pm2008_i2c.pm1p0_grimm); // pm 1.0
+            display.setCursor(0,15);
+            display.print("PM2.5="); // pm 1.0
+            display.println(pm2008_i2c.pm2p5_grimm); // pm 1.0
+            display.setCursor(0,30);
+            display.print("PM10="); // pm 1.0
+            display.println(pm2008_i2c.pm10_grimm); // pm 1.0
+            display.setCursor(0,45);
+            display.println("Status = Good!");  
+            display.display();
+             colorWipe(strip.Color(  0, 255,   0), 50); // Green
+             analogWrite(PAN_PIN, PAN_GOOD);
+          break;
+        }
+      case 2: {
+          Serial.print("PM1.0="); // pm 1.0
+          Serial.println(pm2008_i2c.pm1p0_grimm); // pm 1.0
+           Serial.print("PM2.5="); // pm 1.0
+          Serial.println(pm2008_i2c.pm2p5_grimm); // pm 1.0
+          Serial.print("PM10="); // pm 1.0
+          Serial.println(pm2008_i2c.pm10_grimm); // pm 1.0
+          Serial.println("Normal!");
+          mySerial.println("Normal!");
+          
+            display.setTextColor(WHITE, BLACK);
+            display.setTextSize(1);
+            display.setCursor(0,0);
+            display.print("PM1.0="); // pm 1.0
+            display.println(pm2008_i2c.pm1p0_grimm); // pm 1.0
+            display.setCursor(0,15);
+            display.print("PM2.5="); // pm 1.0
+            display.println(pm2008_i2c.pm2p5_grimm); // pm 1.0
+            display.setCursor(0,30);
+            display.print("PM10="); // pm 1.0
+            display.println(pm2008_i2c.pm10_grimm); // pm 1.0
+            display.setCursor(0,45);
+            display.println("Status = Normal!");  
+            display.display();
+          colorWipe(strip.Color(  0,   0, 255), 50); // Blue
+          analogWrite(PAN_PIN, PAN_NORMAL);
+          break;
+        }
+      case 3: {
+          Serial.print("PM1.0="); // pm 1.0
+          Serial.println(pm2008_i2c.pm1p0_grimm); // pm 1.0
+           Serial.print("PM2.5="); // pm 1.0
+          Serial.println(pm2008_i2c.pm2p5_grimm); // pm 1.0
+          Serial.print("PM10="); // pm 1.0
+          Serial.println(pm2008_i2c.pm10_grimm); // pm 1.0
+          Serial.println("Bad!");
+           mySerial.println("Bad!");
+
+            display.setTextColor(WHITE, BLACK);
+            display.setTextSize(1);
+            display.setCursor(0,0);
+            display.print("PM1.0="); // pm 1.0
+            display.println(pm2008_i2c.pm1p0_grimm); // pm 1.0
+            display.setCursor(0,15);
+            display.print("PM2.5="); // pm 1.0
+            display.println(pm2008_i2c.pm2p5_grimm); // pm 1.0
+            display.setCursor(0,30);
+            display.print("PM10="); // pm 1.0
+            display.println(pm2008_i2c.pm10_grimm); // pm 1.0
+            display.setCursor(0,45);
+            display.println("Status = Bad!");  
+            display.display();
+            colorWipe(strip.Color(255,   0,   0), 50); // Red
+            analogWrite(PAN_PIN, PAN_BAD);
+          break;
+        }
+      case 4: {
+          Serial.print("PM1.0="); // pm 1.0
+          Serial.println(pm2008_i2c.pm1p0_grimm); // pm 1.0
+           Serial.print("PM2.5="); // pm 1.0
+          Serial.println(pm2008_i2c.pm2p5_grimm); // pm 1.0
+          Serial.print("PM10="); // pm 1.0
+          Serial.println(pm2008_i2c.pm10_grimm); // pm 1.0
+          Serial.println("Worst!");
+           mySerial.println("Worst!");
+
+            display.setTextColor(WHITE, BLACK);
+            display.setTextSize(1);
+            display.setCursor(0,0);
+            display.print("PM1.0="); // pm 1.0
+            display.println(pm2008_i2c.pm1p0_grimm); // pm 1.0
+            display.setCursor(0,15);
+            display.print("PM2.5="); // pm 1.0
+            display.println(pm2008_i2c.pm2p5_grimm); // pm 1.0
+            display.setCursor(0,30);
+            display.print("PM10="); // pm 1.0
+            display.println(pm2008_i2c.pm10_grimm); // pm 1.0
+            display.setCursor(0,45);
+            display.println("Status = Worst!");  
+            display.display();
+             colorWipe(strip.Color(255,   0,   0), 50); // Red
+             analogWrite(PAN_PIN, PAN_WORST);
+          break;
+        }
+      default:
+        break;
+    }
+  }
+  delay(3000);
+}
+
+
+// Some functions of our own for creating animated effects -----------------
+
+// Fill strip pixels one after another with a color. Strip is NOT cleared
+// first; anything there will be covered pixel by pixel. Pass in color
+// (as a single 'packed' 32-bit value, which you can get by calling
+// strip.Color(red, green, blue) as shown in the loop() function above),
+// and a delay time (in milliseconds) between pixels.
+void colorWipe(uint32_t color, int wait) {
+  for(int i=0; i<strip.numPixels(); i++) { // For each pixel in strip...
+    strip.setPixelColor(i, color);         //  Set pixel's color (in RAM)
+    strip.show();                          //  Update strip to match
+    delay(wait);                           //  Pause for a moment
+  }
+}
+
+// Theater-marquee-style chasing lights. Pass in a color (32-bit value,
+// a la strip.Color(r,g,b) as mentioned above), and a delay time (in ms)
+// between frames.
+void theaterChase(uint32_t color, int wait) {
+  for(int a=0; a<10; a++) {  // Repeat 10 times...
+    for(int b=0; b<3; b++) { //  'b' counts from 0 to 2...
+      strip.clear();         //   Set all pixels in RAM to 0 (off)
+      // 'c' counts up from 'b' to end of strip in steps of 3...
+      for(int c=b; c<strip.numPixels(); c += 3) {
+        strip.setPixelColor(c, color); // Set pixel 'c' to value 'color'
+      }
+      strip.show(); // Update strip with new contents
+      delay(wait);  // Pause for a moment
+    }
+  }
+}
+
+// Rainbow cycle along whole strip. Pass delay time (in ms) between frames.
+void rainbow(int wait) {
+  // Hue of first pixel runs 5 complete loops through the color wheel.
+  // Color wheel has a range of 65536 but it's OK if we roll over, so
+  // just count from 0 to 5*65536. Adding 256 to firstPixelHue each time
+  // means we'll make 5*65536/256 = 1280 passes through this outer loop:
+  for(long firstPixelHue = 0; firstPixelHue < 5*65536; firstPixelHue += 256) {
+    for(int i=0; i<strip.numPixels(); i++) { // For each pixel in strip...
+      // Offset pixel hue by an amount to make one full revolution of the
+      // color wheel (range of 65536) along the length of the strip
+      // (strip.numPixels() steps):
+      int pixelHue = firstPixelHue + (i * 65536L / strip.numPixels());
+      // strip.ColorHSV() can take 1 or 3 arguments: a hue (0 to 65535) or
+      // optionally add saturation and value (brightness) (each 0 to 255).
+      // Here we're using just the single-argument hue variant. The result
+      // is passed through strip.gamma32() to provide 'truer' colors
+      // before assigning to each pixel:
+      strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue)));
+    }
+    strip.show(); // Update strip with new contents
+    delay(wait);  // Pause for a moment
+  }
+}
+
+// Rainbow-enhanced theater marquee. Pass delay time (in ms) between frames.
+void theaterChaseRainbow(int wait) {
+  int firstPixelHue = 0;     // First pixel starts at red (hue 0)
+  for(int a=0; a<30; a++) {  // Repeat 30 times...
+    for(int b=0; b<3; b++) { //  'b' counts from 0 to 2...
+      strip.clear();         //   Set all pixels in RAM to 0 (off)
+      // 'c' counts up from 'b' to end of strip in increments of 3...
+      for(int c=b; c<strip.numPixels(); c += 3) {
+        // hue of pixel 'c' is offset by an amount to make one full
+        // revolution of the color wheel (range 65536) along the length
+        // of the strip (strip.numPixels() steps):
+        int      hue   = firstPixelHue + c * 65536L / strip.numPixels();
+        uint32_t color = strip.gamma32(strip.ColorHSV(hue)); // hue -> RGB
+        strip.setPixelColor(c, color); // Set pixel 'c' to value 'color'
+      }
+      strip.show();                // Update strip with new contents
+      delay(wait);                 // Pause for a moment
+      firstPixelHue += 65536 / 90; // One cycle of color wheel over 90 frames
+    }
+  }
+}
